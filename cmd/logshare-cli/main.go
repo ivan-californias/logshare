@@ -26,13 +26,20 @@ func main() {
 	log.SetFlags(log.Ltime)
 	log.SetOutput(os.Stderr)
 
+	conf := &config{}
 	app := cli.NewApp()
 	app.Name = "logshare-cli"
 	app.Usage = "Fetch request logs from Cloudflare's Enterprise Log Share API"
 	app.Flags = flags
 	app.Version = Rev
-
-	conf := &config{}
+	app.Commands = []cli.Command{
+		{
+			Name:   "loop",
+			Usage:  "Fetch logs in loop mode",
+			Flags:  loopFlags,
+			Action: runLoop(conf),
+		},
+	}
 	app.Action = run(conf)
 	if err := app.Run(os.Args); err != nil {
 		log.Println(err)
@@ -62,108 +69,148 @@ func setupGoogleStr(projectID string, bucketName string, filename string) (*gcs.
 
 func run(conf *config) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
-		if err := parseFlags(conf, c); err != nil {
-			cli.ShowAppHelp(c)
-			return err
-		}
-
-		// Populate the zoneID if it wasn't supplied.
-		if conf.zoneID == "" {
-			cf, err := cloudflare.New(conf.apiKey, conf.apiEmail)
-			id, err := cf.ZoneIDByName(conf.zoneName)
-			if err != nil {
-				cli.ShowAppHelp(c)
-				return errors.Wrap(err, "could not find a zone for the given ID")
+		client, closers, err := GetClientFromConfigAndContext(conf, c)
+		defer func() {
+			for _, c := range closers {
+				c.Close()
 			}
-
-			conf.zoneID = id
-		}
-
-		outputWriters := make([]io.Writer, 0)
-		if !conf.noStdout {
-			outputWriters = append(outputWriters, os.Stdout)
-		}
-		if conf.googleStorageBucket != "" {
-			fileName := "cloudflare_els_" + conf.zoneID + "_" + strconv.Itoa(int(time.Now().Unix())) + ".json"
-
-			gcsWriter, err := setupGoogleStr(conf.googleProjectID, conf.googleStorageBucket, fileName)
-			if err != nil {
-				return err
-			}
-			defer gcsWriter.Close()
-			outputWriters = append(outputWriters, gcsWriter)
-		}
-		if conf.fileDest != "" {
-			destFile, err := os.Create(conf.fileDest)
-			if err != nil {
-				return err
-			}
-			buf := bufio.NewWriter(destFile)
-			defer func() {
-				buf.Flush()
-				destFile.Close()
-			}()
-			outputWriters = append(outputWriters, buf)
-		}
-		if len(outputWriters) == 0 {
-			log.Printf("Warning: No destinations have been set. All output will be siletly dropped.")
-		}
-
-		client, err := logshare.New(
-			conf.apiKey,
-			conf.apiEmail,
-			&logshare.Options{
-				Fields:          conf.fields,
-				MultiDest:       outputWriters,
-				ByReceived:      true,
-				Sample:          conf.sample,
-				TimestampFormat: conf.timestampFormat,
-			})
+		}()
 		if err != nil {
 			return err
 		}
-
-		// Based on the combination of flags, call against the correct log
-		// endpoint.
-		var meta *logshare.Meta
-
-		if conf.listFields {
-			meta, err = client.FetchFieldNames(conf.zoneID)
-			if err != nil {
-				return errors.Wrap(err, "failed to fetch field names")
-			}
-		} else {
-			meta, err = client.GetFromTimestamp(
-				conf.zoneID, conf.startTime, conf.endTime, conf.count)
-			if err != nil {
-				return errors.Wrap(err, "failed to fetch via timestamp")
-			}
-		}
-
-		log.Printf("HTTP status %d | %dms | %s",
-			meta.StatusCode, meta.Duration, meta.URL)
-		log.Printf("Retrieved %d logs", meta.Count)
-
-		return nil
+		return ClientWork(conf, client)
 	}
 }
 
+func runLoop(conf *config) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+		loopTime := c.Int("loop-wait")
+		//	checkPoint := c.String("checkpoint")
+
+		client, closers, err := GetClientFromConfigAndContext(conf, c)
+		defer func() {
+			for _, c := range closers {
+				c.Close()
+			}
+		}()
+		if err != nil {
+			return err
+		}
+		for {
+			err = ClientWork(conf, client)
+			if err != nil {
+				log.Println(err)
+			}
+			log.Println("Sleeping for seconds :", loopTime)
+			time.Sleep(time.Duration(loopTime) * time.Second)
+		}
+	}
+}
+
+func GetClientFromConfigAndContext(conf *config, c *cli.Context) (*logshare.Client, []io.Closer, error) {
+	closers := make([]io.Closer, 0)
+	if err := parseFlags(conf, c); err != nil {
+		cli.ShowAppHelp(c)
+		return nil, closers, err
+	}
+
+	// Populate the zoneID if it wasn't supplied.
+	if conf.zoneID == "" {
+		cf, err := cloudflare.New(conf.apiKey, conf.apiEmail)
+		id, err := cf.ZoneIDByName(conf.zoneName)
+		if err != nil {
+			cli.ShowAppHelp(c)
+			return nil, closers, errors.Wrap(err, "could not find a zone for the given ID")
+		}
+
+		conf.zoneID = id
+	}
+
+	outputWriters := make([]io.Writer, 0)
+	if !conf.noStdout {
+		outputWriters = append(outputWriters, os.Stdout)
+	}
+	if conf.googleStorageBucket != "" {
+		fileName := "cloudflare_els_" + conf.zoneID + "_" + strconv.Itoa(int(time.Now().Unix())) + ".json"
+
+		gcsWriter, err := setupGoogleStr(conf.googleProjectID, conf.googleStorageBucket, fileName)
+		if err != nil {
+			return err
+		}
+		closers = append(closers, gcsWriter)
+		outputWriters = append(outputWriters, gcsWriter)
+	}
+	if conf.fileDest != "" {
+		destFile, err := os.Create(conf.fileDest)
+		if err != nil {
+			return err
+		}
+		buf := bufio.NewWriter(destFile)
+		closers = append(closers, destFile)
+		outputWriters = append(outputWriters, buf)
+	}
+	if len(outputWriters) == 0 {
+		log.Printf("Warning: No destinations have been set. All output will be siletly dropped.")
+	}
+
+	client, err := logshare.New(
+		conf.apiKey,
+		conf.apiEmail,
+		&logshare.Options{
+			Fields:          conf.fields,
+			MultiDest:       outputWriters,
+			ByReceived:      true,
+			Sample:          conf.sample,
+			TimestampFormat: conf.timestampFormat,
+		})
+	if err != nil {
+		return nil, closers, err
+	}
+	return client, closers, nil
+}
+
+func ClientWork(conf *config, client *logshare.Client) error {
+	// Based on the combination of flags, call against the correct log
+	// endpoint.
+	var meta *logshare.Meta
+	var err error
+
+	if conf.listFields {
+		meta, err = client.FetchFieldNames(conf.zoneID)
+		if err != nil {
+			return errors.Wrap(err, "failed to fetch field names")
+		}
+	} else {
+		meta, err = client.GetFromTimestamp(
+			conf.zoneID, conf.startTime, conf.endTime, conf.count)
+		if err != nil {
+			return errors.Wrap(err, "failed to fetch via timestamp")
+		}
+	}
+
+	log.Printf("HTTP status %d | %dms | %s",
+		meta.StatusCode, meta.Duration, meta.URL)
+	log.Printf("Retrieved %d logs", meta.Count)
+
+	return nil
+}
+
 func parseFlags(conf *config, c *cli.Context) error {
-	conf.apiKey = c.String("api-key")
-	conf.apiEmail = c.String("api-email")
-	conf.zoneID = c.String("zone-id")
-	conf.zoneName = c.String("zone-name")
-	conf.startTime = c.Int64("start-time")
-	conf.endTime = c.Int64("end-time")
-	conf.count = c.Int("count")
-	conf.timestampFormat = c.String("timestamp-format")
-	conf.sample = c.Float64("sample")
-	conf.fields = c.StringSlice("fields")
-	conf.listFields = c.Bool("list-fields")
-	conf.googleStorageBucket = c.String("google-storage-bucket")
-	conf.googleProjectID = c.String("google-project-id")
-	conf.fileDest = c.String("file-dest")
-	conf.noStdout = c.Bool("no-stdout")
+	conf.apiKey = c.GlobalString("api-key")
+	conf.apiEmail = c.GlobalString("api-email")
+	conf.zoneID = c.GlobalString("zone-id")
+	conf.zoneName = c.GlobalString("zone-name")
+	conf.startTime = c.GlobalInt64("start-time")
+	conf.endTime = c.GlobalInt64("end-time")
+	conf.count = c.GlobalInt("count")
+	conf.timestampFormat = c.GlobalString("timestamp-format")
+	conf.sample = c.GlobalFloat64("sample")
+	conf.fields = c.GlobalStringSlice("fields")
+	conf.listFields = c.GlobalBool("list-fields")
+	conf.googleStorageBucket = c.GlobalString("google-storage-bucket")
+	conf.googleProjectID = c.GlobalString("google-project-id")
+	conf.fileDest = c.GlobalString("file-dest")
+	conf.noStdout = c.GlobalBool("no-stdout")
 
 	return conf.Validate()
 }
@@ -276,5 +323,18 @@ var flags = []cli.Flag{
 	cli.BoolFlag{
 		Name:  "no-stdout",
 		Usage: "Disable logs output to Stdout",
+	},
+}
+
+var loopFlags = []cli.Flag{
+	cli.IntFlag{
+		Name:  "loop-wait",
+		Value: 60,
+		Usage: "The number seconds to wait after every loop cycle",
+	},
+	cli.StringFlag{
+		Name:  "checkpoint",
+		Value: "timestamp",
+		Usage: "The type of checkpoint to use: 'timestamp' or 'ray-id'",
 	},
 }
