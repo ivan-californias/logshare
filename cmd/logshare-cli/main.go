@@ -17,6 +17,7 @@ import (
 	"golang.org/x/net/context"
 )
 
+type closeWriterFn func ()
 // Rev is set on build time and should contain the git commit logshare-cli
 // was built from.
 var Rev = ""
@@ -71,8 +72,8 @@ func run(conf *config) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
 		client, closers, err := GetClientFromConfigAndContext(conf, c)
 		defer func() {
-			for _, c := range closers {
-				c.Close()
+			for _, closeFn := range closers {
+				closeFn()
 			}
 		}()
 		if err != nil {
@@ -89,8 +90,8 @@ func runLoop(conf *config) func(c *cli.Context) error {
 
 		client, closers, err := GetClientFromConfigAndContext(conf, c)
 		defer func() {
-			for _, c := range closers {
-				c.Close()
+			for _, closeFn := range closers {
+				closeFn()
 			}
 		}()
 		if err != nil {
@@ -107,8 +108,8 @@ func runLoop(conf *config) func(c *cli.Context) error {
 	}
 }
 
-func GetClientFromConfigAndContext(conf *config, c *cli.Context) (*logshare.Client, []io.Closer, error) {
-	closers := make([]io.Closer, 0)
+func GetClientFromConfigAndContext(conf *config, c *cli.Context) (*logshare.Client, []closeWriterFn, error) {
+	closers := make([]closeWriterFn, 0)
 	if err := parseFlags(conf, c); err != nil {
 		cli.ShowAppHelp(c)
 		return nil, closers, err
@@ -137,7 +138,9 @@ func GetClientFromConfigAndContext(conf *config, c *cli.Context) (*logshare.Clie
 		if err != nil {
 			return err
 		}
-		closers = append(closers, gcsWriter)
+		closers = append(closers, func() {
+			gcsWriter.Close()
+		})
 		outputWriters = append(outputWriters, gcsWriter)
 	}
 	if conf.fileDest != "" {
@@ -146,7 +149,10 @@ func GetClientFromConfigAndContext(conf *config, c *cli.Context) (*logshare.Clie
 			return err
 		}
 		buf := bufio.NewWriter(destFile)
-		closers = append(closers, destFile)
+		closers = append(closers, func() {
+			buf.Flush()
+			destFile.Close()
+		})
 		outputWriters = append(outputWriters, buf)
 	}
 	if len(outputWriters) == 0 {
