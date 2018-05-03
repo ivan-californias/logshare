@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"io"
 	"log"
 	"os"
@@ -12,6 +14,7 @@ import (
 	gcs "cloud.google.com/go/storage"
 	cloudflare "github.com/cloudflare/cloudflare-go"
 	"github.com/cloudflare/logshare"
+	"github.com/ZachtimusPrime/Go-Splunk-HTTP/splunk"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"golang.org/x/net/context"
@@ -60,11 +63,34 @@ func setupGoogleStr(projectID string, bucketName string, filename string) (*gcs.
 	return obj.NewWriter(gCtx), error
 }
 
+func sendEventsSplunk(client *splunk.Client, reader io.Reader) {
+	scanner := bufio.NewScanner(reader)
+	splunkEvents := make([]*splunk.Event, 0)
+	for scanner.Scan() {
+		logEvent := new(logshare.Event)
+		err := json.Unmarshal(scanner.Bytes(), &logEvent)
+		if err != nil {
+			log.Println("Error decoding JSON from logshare event, skipping:", err)
+		} else {
+			spEvt := client.NewEvent(logEvent, client.Source, client.SourceType, client.Index)
+			splunkEvents = append(splunkEvents, spEvt)
+		}
+	}
+	err := client.LogEvents(splunkEvents)
+	if err != nil {
+		log.Println("Error sending events to Splunk:", err)
+	}
+}
+
 func run(conf *config) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
 		if err := parseFlags(conf, c); err != nil {
 			cli.ShowAppHelp(c)
 			return err
+		}
+
+		if conf.allFields {
+			conf.fields = logshare.AllFields
 		}
 
 		// Populate the zoneID if it wasn't supplied.
@@ -104,6 +130,19 @@ func run(conf *config) func(c *cli.Context) error {
 				destFile.Close()
 			}()
 			outputWriters = append(outputWriters, buf)
+		}
+		if conf.splunkURL != "" {
+			splunkCli := splunk.NewClient(
+				nil,
+				conf.splunkURL,
+				conf.splunkToken,
+				conf.splunkSource,
+				conf.splunkSourcetype,
+				conf.splunkIndex,
+			)
+			eventsBuffer := new(bytes.Buffer)
+			defer sendEventsSplunk(splunkCli, eventsBuffer)
+			outputWriters = append(outputWriters, eventsBuffer)
 		}
 		if len(outputWriters) == 0 {
 			log.Printf("Warning: No destinations have been set. All output will be siletly dropped.")
@@ -159,11 +198,17 @@ func parseFlags(conf *config, c *cli.Context) error {
 	conf.timestampFormat = c.String("timestamp-format")
 	conf.sample = c.Float64("sample")
 	conf.fields = c.StringSlice("fields")
+	conf.allFields = c.Bool("all-fields")
 	conf.listFields = c.Bool("list-fields")
 	conf.googleStorageBucket = c.String("google-storage-bucket")
 	conf.googleProjectID = c.String("google-project-id")
 	conf.fileDest = c.String("file-dest")
 	conf.noStdout = c.Bool("no-stdout")
+	conf.splunkURL = c.String("splunk-url")
+	conf.splunkToken = c.String("splunk-token")
+	conf.splunkIndex = c.String("splunk-index")
+	conf.splunkSource = c.String("splunk-source")
+	conf.splunkSourcetype = c.String("splunk-sourcetype")
 
 	return conf.Validate()
 }
@@ -179,9 +224,15 @@ type config struct {
 	timestampFormat     string
 	sample              float64
 	fields              []string
+	allFields          bool
 	listFields          bool
 	googleStorageBucket string
 	googleProjectID     string
+	splunkURL     string
+	splunkToken     string
+	splunkIndex     string
+	splunkSource     string
+	splunkSourcetype     string
 	fileDest            string
 	noStdout            bool
 }
@@ -202,6 +253,10 @@ func (conf *config) Validate() error {
 
 	if (conf.googleStorageBucket == "") != (conf.googleProjectID == "") {
 		return errors.New("Both google-storage-bucket and google-project-id must be provided to upload to Google Storage")
+	}
+
+	if conf.splunkURL != "" && (conf.splunkToken == "" || conf.splunkIndex == "") {
+		return errors.New("Both splunk-token and splunk-index must be provided to upload to Splunk")
 	}
 
 	return nil
@@ -258,6 +313,10 @@ var flags = []cli.Flag{
 		Usage: "Select specific fields to retrieve in the log response. Pass a comma-separated list to fields to specify multiple fields.",
 	},
 	cli.BoolFlag{
+		Name:  "all-fields",
+		Usage: "Select all fields to retrieve in the log response. Ignores --fields flag",
+	},
+	cli.BoolFlag{
 		Name:  "list-fields",
 		Usage: "List the available log fields for use with the --fields flag",
 	},
@@ -276,5 +335,27 @@ var flags = []cli.Flag{
 	cli.BoolFlag{
 		Name:  "no-stdout",
 		Usage: "Disable logs output to Stdout",
+	},
+	cli.StringFlag{
+		Name:  "splunk-url",
+		Usage: "URL (https://example.com:8080/services/collector) of the Splunk server to upload logs to",
+	},
+	cli.StringFlag{
+		Name:  "splunk-token",
+		Usage: "Authentication token to be used to upload logs to Splunk",
+	},
+	cli.StringFlag{
+		Name:  "splunk-index",
+		Usage: "Index name in Splunk to upload logs to",
+	},
+	cli.StringFlag{
+		Name:  "splunk-source",
+		Value: "Cloudflare-ELS",
+		Usage: "Source tag to be attached to all logs sent to Splunk",
+	},
+	cli.StringFlag{
+		Name:  "splunk-sourcetype",
+		Value: "cloudflare-log",
+		Usage: "Sourcetype tag to be attached to all logs sent to Splunk",
 	},
 }

@@ -281,3 +281,103 @@ func cloneHeader(header http.Header) http.Header {
 	}
 	return h
 }
+
+type Event struct {
+  CacheCacheStatus                 string `json:"CacheCacheStatus,omitempty"` 
+  CacheResponseBytes               int `json:"CacheResponseBytes,omitempty"` 
+  CacheResponseStatus              int `json:"CacheResponseStatus,omitempty"` 
+  CacheTieredFill                  bool `json:"CacheTieredFill,omitempty"` 
+  ClientASN                        int `json:"ClientASN,omitempty"` 
+  ClientCountry                    string `json:"ClientCountry,omitempty"` 
+  ClientDeviceType                 string `json:"ClientDeviceType,omitempty"` 
+  ClientIP                         string `json:"ClientIP,omitempty"` 
+  ClientIPClass                    string `json:"ClientIPClass,omitempty"` 
+  ClientRequestBytes               int `json:"ClientRequestBytes,omitempty"` 
+  ClientRequestHost                string `json:"ClientRequestHost,omitempty"` 
+  ClientRequestMethod              string `json:"ClientRequestMethod,omitempty"` 
+  ClientRequestProtocol            string `json:"ClientRequestProtocol,omitempty"` 
+  ClientRequestReferer             string `json:"ClientRequestReferer,omitempty"` 
+  ClientRequestURI                 string `json:"ClientRequestURI,omitempty"` 
+  ClientRequestUserAgent           string `json:"ClientRequestUserAgent,omitempty"` 
+  ClientSSLCipher                  string `json:"ClientSSLCipher,omitempty"` 
+  ClientSSLProtocol                string `json:"ClientSSLProtocol,omitempty"` 
+  ClientSrcPort                    int `json:"ClientSrcPort,omitempty"` 
+  EdgeColoID                       int `json:"EdgeColoID,omitempty"` 
+  EdgeEndTimestamp                 int64 `json:"EdgeEndTimestamp,omitempty"` 
+  EdgePathingOp                    string `json:"EdgePathingOp,omitempty"` 
+  EdgePathingSrc                   string `json:"EdgePathingSrc,omitempty"` 
+  EdgePathingStatus                string `json:"EdgePathingStatus,omitempty"` 
+  EdgeRequestHost                  string `json:"EdgeRequestHost,omitempty"` 
+  EdgeResponseBytes                int `json:"EdgeResponseBytes,omitempty"` 
+  EdgeResponseCompressionRatio     float32 `json:"EdgeResponseCompressionRatio,omitempty"` 
+  EdgeResponseContentType          string `json:"EdgeResponseContentType,omitempty"` 
+  EdgeResponseStatus               int `json:"EdgeResponseStatus,omitempty"` 
+  EdgeServerIP                     string `json:"EdgeServerIP,omitempty"` 
+  EdgeStartTimestamp               int64 `json:"EdgeStartTimestamp,omitempty"` 
+  OriginIP                         string `json:"OriginIP,omitempty"` 
+  OriginResponseBytes              int `json:"OriginResponseBytes,omitempty"` 
+  OriginResponseHTTPExpires        string `json:"OriginResponseHTTPExpires,omitempty"` 
+  OriginResponseHTTPLastModified   string `json:"OriginResponseHTTPLastModified,omitempty"` 
+  OriginResponseStatus             int `json:"OriginResponseStatus,omitempty"` 
+  OriginResponseTime               int64 `json:"OriginResponseTime,omitempty"` 
+  OriginSSLProtocol                string `json:"OriginSSLProtocol,omitempty"` 
+  RayID                            string `json:"RayID,omitempty"` 
+  SecurityLevel                    string `json:"SecurityLevel,omitempty"` 
+  WAFAction                        string `json:"WAFAction,omitempty"` 
+  WAFFlags                         string `json:"WAFFlags,omitempty"` 
+  WAFMatchedVar                    string `json:"WAFMatchedVar,omitempty"` 
+  WAFProfile                       string `json:"WAFProfile,omitempty"` 
+  WAFRuleID                        string `json:"WAFRuleID,omitempty"` 
+  WAFRuleMessage                   string `json:"WAFRuleMessage,omitempty"` 
+  ZoneID                           int `json:"ZoneID,omitempty"` 
+}
+
+var AllFields = []string{
+	"CacheCacheStatus",
+	"CacheResponseBytes",
+	"CacheResponseStatus",
+	"CacheTieredFill",
+	"ClientASN",
+	"ClientCountry",
+	"ClientDeviceType",
+	"ClientIP",
+	"ClientIPClass",
+	"ClientRequestBytes",
+	"ClientRequestHost",
+	"ClientRequestMethod",
+	"ClientRequestProtocol",
+	"ClientRequestReferer",
+	"ClientRequestURI",
+	"ClientRequestUserAgent",
+	"ClientSSLCipher",
+	"ClientSSLProtocol",
+	"ClientSrcPort",
+	"EdgeColoID",
+	"EdgeEndTimestamp",
+	"EdgePathingOp",
+	"EdgePathingSrc",
+	"EdgePathingStatus",
+	"EdgeRequestHost",
+	"EdgeResponseBytes",
+	"EdgeResponseCompressionRatio",
+	"EdgeResponseContentType",
+	"EdgeResponseStatus",
+	"EdgeServerIP",
+	"EdgeStartTimestamp",
+	"OriginIP",
+	"OriginResponseBytes",
+	"OriginResponseHTTPExpires",
+	"OriginResponseHTTPLastModified",
+	"OriginResponseStatus",
+	"OriginResponseTime",
+	"OriginSSLProtocol",
+	"RayID",
+	"SecurityLevel",
+	"WAFAction",
+	"WAFFlags",
+	"WAFMatchedVar",
+	"WAFProfile",
+	"WAFRuleID",
+	"WAFRuleMessage",
+	"ZoneID",
+}
