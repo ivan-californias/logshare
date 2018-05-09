@@ -39,6 +39,7 @@ func main() {
 	app.Action = run(conf)
 	if err := app.Run(os.Args); err != nil {
 		log.Println(err)
+		os.Exit(1)
 	}
 }
 
@@ -63,7 +64,7 @@ func setupGoogleStr(projectID string, bucketName string, filename string) (*gcs.
 	return obj.NewWriter(gCtx), error
 }
 
-func sendEventsSplunk(client *splunk.Client, reader io.Reader) {
+func sendEventsSplunk(client *splunk.Client, reader io.Reader) error {
 	scanner := bufio.NewScanner(reader)
 	splunkEvents := make([]*splunk.Event, 0)
 	for scanner.Scan() {
@@ -76,10 +77,7 @@ func sendEventsSplunk(client *splunk.Client, reader io.Reader) {
 			splunkEvents = append(splunkEvents, spEvt)
 		}
 	}
-	err := client.LogEvents(splunkEvents)
-	if err != nil {
-		log.Println("Error sending events to Splunk:", err)
-	}
+	return client.LogEvents(splunkEvents)
 }
 
 func run(conf *config) func(c *cli.Context) error {
@@ -131,8 +129,10 @@ func run(conf *config) func(c *cli.Context) error {
 			}()
 			outputWriters = append(outputWriters, buf)
 		}
+		var splunkCli *splunk.Client
+		eventsBuffer := new(bytes.Buffer)
 		if conf.splunkURL != "" {
-			splunkCli := splunk.NewClient(
+			splunkCli = splunk.NewClient(
 				nil,
 				conf.splunkURL,
 				conf.splunkToken,
@@ -140,8 +140,6 @@ func run(conf *config) func(c *cli.Context) error {
 				conf.splunkSourcetype,
 				conf.splunkIndex,
 			)
-			eventsBuffer := new(bytes.Buffer)
-			defer sendEventsSplunk(splunkCli, eventsBuffer)
 			outputWriters = append(outputWriters, eventsBuffer)
 		}
 		if len(outputWriters) == 0 {
@@ -182,6 +180,10 @@ func run(conf *config) func(c *cli.Context) error {
 		log.Printf("HTTP status %d | %dms | %s",
 			meta.StatusCode, meta.Duration, meta.URL)
 		log.Printf("Retrieved %d logs", meta.Count)
+
+		if splunkCli != nil && meta.Count > 0 {
+			return sendEventsSplunk(splunkCli, eventsBuffer)
+		}
 
 		return nil
 	}
